@@ -31,3 +31,27 @@ other personal data.
 
 This project is designed for local use. Do not expose its development server or
 helper port directly to the public internet.
+
+## Optional remote MCP doorway
+
+The Claude connector uses a separate loopback-only listener and exposes only
+the read-only `ask_dashboard` tool. It reads the existing SQLite snapshot and
+cannot request a refresh, browse the web, invoke Agent-note, open arbitrary
+files, or write data.
+
+The remote listener remains disabled unless all OAuth settings are present. It
+requires:
+
+- an HTTPS public MCP URL;
+- an HTTPS OAuth/OIDC issuer and JWKS URL;
+- the exact access-token audience;
+- one allowed subject or email;
+- the `dashboard-read` scope when the identity provider can issue it; and
+- an HTTPS tunnel to the loopback listener.
+
+The public endpoint advertises OAuth protected-resource metadata and validates
+the token signature, issuer, audience, expiration, and identity. When a custom
+scope is configured, it validates that too. Leaving the scope empty is only
+appropriate for this single-user, exact-audience, read-only tool surface. A
+tunnel provides HTTPS reachability but is not authorization. Stop the tunnel or
+unload the remote launch agent to disable remote access immediately.

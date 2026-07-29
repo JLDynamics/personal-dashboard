@@ -339,13 +339,39 @@ function validHackerNewsSummaryPayload(
   });
 }
 
-async function fetchHackerNews(): Promise<AdapterResult<HackerNewsItem[]>> {
+function sameHackerNewsSelection(
+  selected: Array<{ id: number }>,
+  previous: HackerNewsItem[],
+): boolean {
+  return (
+    selected.length === previous.length &&
+    selected.every((story, index) => previous[index]?.id === `hn-${story.id}`)
+  );
+}
+
+async function fetchHackerNews(
+  previous: HackerNewsItem[] = [],
+): Promise<AdapterResult<HackerNewsItem[]>> {
   const now = new Date();
   const selected = await selectRankedHackerNewsStories(async (url) => {
     return (await fetchWithTimeout(url)).json();
   }, now);
   if (selected.length !== 3) {
     throw new Error("Hacker News returned fewer than 3 qualifying AI stories");
+  }
+
+  if (sameHackerNewsSelection(selected, previous)) {
+    const summaries = new Map(previous.map((item) => [item.id, item.summary]));
+    return {
+      value: selected.map((story) =>
+        toHackerNewsItem(
+          story,
+          summaries.get(`hn-${story.id}`),
+          now,
+        ),
+      ),
+      status: "HN top stories · unchanged fingerprint",
+    };
   }
 
   const articleContents = await Promise.all(
@@ -845,11 +871,64 @@ async function resolved<T>(
   }
 }
 
-export async function getLiveDashboard(): Promise<DashboardData> {
+export type DashboardRefreshScope = "full" | "news" | "library";
+
+export async function getLiveDashboardForScope(
+  current: DashboardData,
+  scope: DashboardRefreshScope,
+): Promise<DashboardData> {
+  if (scope === "news") {
+    const [x, hn, tech] = await Promise.all([
+      resolved(fetchXExplore(), current.trends, "Saved Trending AI"),
+      resolved(
+        fetchHackerNews(current.hnTrends),
+        current.hnTrends,
+        "Saved Hacker News",
+      ),
+      resolved(fetchTechNews(), current.techNews, "Saved feeds"),
+    ]);
+    return {
+      ...current,
+      savedAt: new Date().toISOString(),
+      profile: dashboardProfile(),
+      sourceStatus: {
+        ...current.sourceStatus,
+        x: x.status,
+        hn: hn.status,
+        tech: tech.status,
+      },
+      trends: x.value,
+      hnTrends: hn.value,
+      techNews: tech.value,
+    };
+  }
+
+  if (scope === "library") {
+    const library = await resolved(
+      fetchLibrary(),
+      current.library,
+      "Agent-note unavailable",
+    );
+    return {
+      ...current,
+      savedAt: new Date().toISOString(),
+      profile: dashboardProfile(),
+      sourceStatus: {
+        ...current.sourceStatus,
+        library: library.status,
+      },
+      library: library.value,
+    };
+  }
+
   const [x, hn, tech, market, weather, calendar, movies, library] =
     await Promise.all([
     resolved(fetchXExplore(), sampleData.trends, "Saved Trending AI"),
-    resolved(fetchHackerNews(), sampleData.hnTrends, "Saved Hacker News"),
+    resolved(
+      fetchHackerNews(current.hnTrends),
+      current.hnTrends,
+      "Saved Hacker News",
+    ),
     resolved(fetchTechNews(), sampleData.techNews, "Saved feeds"),
     resolved(fetchTesla(), sampleData.tesla, "Saved quote"),
     resolved(fetchWeather(), sampleData.weather, "Saved forecast"),
@@ -880,4 +959,8 @@ export async function getLiveDashboard(): Promise<DashboardData> {
     movies: movies.value,
     library: library.value,
   };
+}
+
+export async function getLiveDashboard(): Promise<DashboardData> {
+  return getLiveDashboardForScope(sampleData, "full");
 }

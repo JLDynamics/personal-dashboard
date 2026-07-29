@@ -1,16 +1,18 @@
 # Local Daily Dashboard
 
 A polished, local-first daily briefing for AI, technology, weather, markets,
-calendar events, your recent Agent-note library, and newly added movies. The dashboard shows saved data
-immediately, refreshes its sources once when opened, and refreshes again only
-when you press **Refresh now**.
+calendar events, your recent Agent-note library, and newly added movies. The
+dashboard shows saved data immediately from a small local SQLite cache. It
+refreshes news every three hours, refreshes Agent-note twice a day, and still
+supports a complete manual refresh with **Refresh now**.
 
 The application is intentionally personal and local:
 
-- no database or hosted account is required;
+- one bounded local SQLite database stores the latest snapshot and source state;
 - browser preferences and cached cards stay in `localStorage`;
 - local helpers bind only to `127.0.0.1`;
-- no background polling, cron job, or hourly model call runs; and
+- scheduled refreshes run only while the local dashboard process is running;
+- a read-only local MCP tool can answer questions from cached data; and
 - one failed source never removes the last good cards from another source.
 
 ## What it includes
@@ -19,7 +21,7 @@ The application is intentionally personal and local:
 | --- | --- |
 | Trending AI | Three current X stories collected through an authenticated local Grok CLI, plus three AI stories selected from Hacker News `topstories` |
 | Tech News | Five stories from The Verge's public Most Popular list, three Wccftech Trending stories, and three recent stories each from MobileSyrup and iPhone in Canada |
-| My Library · Past 7 Days | Recent normal notes from Agent-note, with title, saved time, tags, a deterministic short preview, and the guarded full Markdown note |
+| My Library · Past 7 Days | Recent normal notes from Agent-note, with title, saved time, tags, the note's saved brief summary, and the guarded full Markdown note |
 | Weather | Open-Meteo using configurable coordinates, label, and time zone |
 | Tesla | Yahoo Finance's keyless TSLA five-day chart endpoint |
 | Schedule | Up to eight upcoming macOS Calendar events from the next seven days |
@@ -44,14 +46,15 @@ boost on later refreshes.
   `AGENT_NOTE_PROJECT_DIR`, for the optional My Library card
 
 The dashboard still starts when optional local capabilities are unavailable.
-It keeps the last successful cards or bundled sample data for those sections.
+It keeps the last successful SQLite snapshot, browser cards, or bundled sample
+data for those sections.
 
 ## Quick start
 
 ```bash
 git clone https://github.com/JLDynamics/personal-dashboard.git
 cd personal-dashboard
-npm install
+npm ci
 cp .env.example .env.local
 npm run dev
 ```
@@ -85,31 +88,80 @@ Local environment files are ignored by Git.
 ## How refresh works
 
 1. The browser renders bundled sample data or its last locally saved view.
-2. It requests `/api/dashboard` once after mounting.
-3. The server refreshes independent sources concurrently.
-4. Local validation rejects malformed, duplicated, stale, or unsafe results.
-5. The browser merges successful sections and keeps existing cards for failed
-   sections.
-6. A manual refresh repeats the flow through `/api/dashboard?force=1`.
+2. The local cache daemon opens the latest snapshot from
+   `.local/dashboard.sqlite3`.
+3. News sources are due every three hours; Agent-note is due every 12 hours.
+4. Each source has its own SHA-256 content fingerprint. Unchanged sources keep
+   their existing cards, while changed sources replace only their own rows.
+5. Local validation rejects malformed, duplicated, stale, or unsafe results.
+6. A manual refresh repeats the complete flow through
+   `/api/dashboard?force=1`.
 
 The server coalesces simultaneous refreshes and keeps a 60-second in-process
-cache. The HTTP response itself is marked `no-store`.
+cache. The HTTP response itself is marked `no-store`. SQLite contains one
+current dashboard snapshot plus one state row per source, so refreshes overwrite
+bounded data instead of accumulating article history.
+
+Hacker News first checks the deterministic official `topstories` selection. If
+the selected story IDs are unchanged, the previous summaries are reused and no
+new Grok summary call runs. The X refresh still requires its bounded Grok search
+because X does not provide an equivalent public source fingerprint.
+
+## Ask My Dashboard
+
+Starting the app also starts a local MCP server at
+`loopback-only MCP endpoint`. It currently exposes one read-only tool:
+`ask_dashboard`.
+
+The tool selects only the relevant parts of the cached dashboard, then asks the
+local Grok 4.5 CLI for a concise answer. Web search and local file tools are
+disabled for this operation, so it cannot silently fetch new information or
+modify the dashboard. The result includes the cache timestamp and the dashboard
+sections it used.
+
+Port 8791 remains intentionally localhost-only. An optional second listener can
+serve the same one-tool MCP surface on port 8792 for a Claude custom connector.
+The remote listener refuses to start unless its HTTPS public URL, OAuth issuer,
+JWKS URL, token audience, and one approved identity are configured. A separate
+`dashboard-read` scope is preferred when the identity provider issues custom
+scopes. For a single-user provider that does not, the scope may be left empty
+because the exact audience, exact identity, and read-only tool surface remain
+mandatory. It still binds only to loopback and must sit behind a secure HTTPS
+tunnel.
+
+The remote doorway uses MCP 2026-07-28 while retaining the SDK's compatible
+legacy transport for current Claude clients. It publishes RFC 9728 protected
+resource metadata, validates signed Auth0 JWT access tokens, and rejects any
+other identity or audience. When configured, it also requires the custom scope.
+Claude receives only `ask_dashboard`; it cannot refresh sources, open files, or
+modify dashboard or Agent-note data.
+
+Validate the remote environment without opening a port:
+
+```bash
+npm run mcp:check-remote
+```
+
+Never expose the local development server, port 8788, port 8790, or the
+unauthenticated local MCP port 8791 through a tunnel.
 
 ## Model usage
 
 The dashboard does not use a model to rank ordinary RSS, weather, market, or
 calendar data.
 
-My Library does not invoke a model. Its preview is a short deterministic excerpt
-from the normal-note text returned by Agent-note.
+My Library does not invoke a model. Its card uses the durable brief summary
+already saved by the agent that created the normal Agent-note note.
 
-The local helper uses Grok for three bounded operations:
+The local helper uses Grok for four bounded operations:
 
 1. search public X discussion for three current AI news clusters;
 2. summarize the readable bodies of the three already-selected Hacker News
    articles, with web search disabled; and
 3. translate the three selected movie titles, genres, and synopses into English,
-   with web search disabled.
+   with web search disabled; and
+4. answer an explicit `ask_dashboard` question from selected cached sections,
+   with both web search and local tools disabled.
 
 All model output is parsed and validated locally. Credentials stay inside the
 installed Grok CLI and never enter browser code.
@@ -158,8 +210,13 @@ app/
   dashboard.tsx             dashboard UI
   data/                     source adapters, filtering, merging, and types
 scripts/
-  run-local.mjs             starts the local helper and app together
+  run-local.mjs             starts all local services and the app together
   grok-x-collector.mjs      token-protected loopback helper
+  dashboard-cache.mjs       bounded SQLite snapshot and source fingerprints
+  dashboard-daemon.ts       scheduled refresh coordinator
+  dashboard-answer.mjs      cached-data-only Grok question answering
+  dashboard-mcp.ts          local and authenticated remote MCP listeners
+  dashboard-remote-auth.ts  OAuth/JWT validation and resource metadata
   calendar-events.m         minimal macOS EventKit reader
   agent-note-library.mjs    Agent-note CLI adapter for weekly notes
   yfsp-recent.mjs           public movie-list extraction
@@ -172,10 +229,20 @@ worker/index.ts             vinext worker entry point
 ```bash
 npm run dev
 npm run lint
+npm run typecheck
 npm test
 ```
 
 `npm test` performs a production build before running the Node test suite.
+`npm run daemon` and `npm run mcp` are available for focused local debugging;
+normal use should start everything together with `npm run dev`.
+
+## Build tooling
+
+The project uses vinext, Vite, and Cloudflare's Vite plugin as local build
+tools. They compile the Next-style `app/` routes and provide the Worker-like
+environment used by the local API route. Running or building the dashboard does
+not require a Cloudflare account and does not deploy or upload the application.
 
 ## Security
 
