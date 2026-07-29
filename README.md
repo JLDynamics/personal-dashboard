@@ -71,7 +71,8 @@ DASHBOARD_WEATHER_LOCATION=Sample location
 DASHBOARD_TIME_ZONE=UTC
 ```
 
-If the Grok executable is not on your `PATH`, add its absolute path:
+Keep your real location values only in the ignored `.env.local` file. If the
+Grok executable is not on your `PATH`, add its absolute path:
 
 ```dotenv
 GROK_CLI_PATH=/absolute/path/to/grok

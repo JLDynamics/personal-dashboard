@@ -39,11 +39,11 @@ test("Grok answers from cached context with web and local tools disabled", async
     environment: { PATH: "/usr/bin", HOME: "/tmp" },
     execute: async (executable, args, options) => {
       captured = { executable, args, options };
-      return { stdout: "\u001b[32mIt is clear in Sample location.\u001b[0m\n" };
+      return { stdout: "\u001b[32mIt is clear at the sample location.\u001b[0m\n" };
     },
   });
 
-  assert.equal(output.answer, "It is clear in Sample location.");
+  assert.equal(output.answer, "It is clear at the sample location.");
   assert.deepEqual(output.usedSections, ["weather"]);
   assert.equal(captured.executable, "grok");
   assert.ok(captured.args.includes("--disable-web-search"));
