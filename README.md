@@ -10,7 +10,7 @@ The application is intentionally personal and local:
 
 - one bounded local SQLite database stores the latest snapshot and source state;
 - browser preferences and cached cards stay in `localStorage`;
-- local helpers bind only to `127.0.0.1`;
+- local helpers accept connections only from the same computer;
 - scheduled refreshes run only while the local dashboard process is running;
 - a read-only local MCP tool can answer questions from cached data; and
 - one failed source never removes the last good cards from another source.
@@ -110,9 +110,8 @@ because X does not provide an equivalent public source fingerprint.
 
 ## Ask My Dashboard
 
-Starting the app also starts a local MCP server at
-`loopback-only MCP endpoint`. It currently exposes one read-only tool:
-`ask_dashboard`.
+Starting the app also starts a loopback-only MCP server. It currently exposes
+one read-only tool: `ask_dashboard`.
 
 The tool selects only the relevant parts of the cached dashboard, then asks the
 local Grok 4.5 CLI for a concise answer. Web search and local file tools are
@@ -120,15 +119,15 @@ disabled for this operation, so it cannot silently fetch new information or
 modify the dashboard. The result includes the cache timestamp and the dashboard
 sections it used.
 
-Port 8791 remains intentionally localhost-only. An optional second listener can
-serve the same one-tool MCP surface on port 8792 for a Claude custom connector.
-The remote listener refuses to start unless its HTTPS public URL, OAuth issuer,
-JWKS URL, token audience, and one approved identity are configured. A separate
-`dashboard-read` scope is preferred when the identity provider issues custom
-scopes. For a single-user provider that does not, the scope may be left empty
-because the exact audience, exact identity, and read-only tool surface remain
-mandatory. It still binds only to loopback and must sit behind a secure HTTPS
-tunnel.
+The local MCP service remains intentionally reachable only from the same
+computer. An optional second loopback-only listener can serve the same one-tool
+surface for a Claude custom connector. The remote listener refuses to start
+unless its HTTPS public URL, OAuth issuer, JWKS URL, token audience, and one
+approved identity are configured. A separate `dashboard-read` scope is
+preferred when the identity provider issues custom scopes. For a single-user
+provider that does not, the scope may be left empty because the exact audience,
+exact identity, and read-only tool surface remain mandatory. It must sit behind
+a secure HTTPS tunnel.
 
 The remote doorway uses MCP 2026-07-28 while retaining the SDK's compatible
 legacy transport for current Claude clients. It publishes RFC 9728 protected
@@ -143,8 +142,8 @@ Validate the remote environment without opening a port:
 npm run mcp:check-remote
 ```
 
-Never expose the local development server, port 8788, port 8790, or the
-unauthenticated local MCP port 8791 through a tunnel.
+Never expose the development server, local helper, cache coordinator, or
+unauthenticated local MCP service through a tunnel.
 
 ## Model usage
 
