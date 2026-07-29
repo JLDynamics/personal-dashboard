@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { collectRecentYfspMovies } from "./yfsp-recent.mjs";
 import { collectMacCalendarEvents } from "./calendar-collector.mjs";
+import { collectAgentNoteLibrary } from "./agent-note-library.mjs";
 
 export const GROK_MODEL = "grok-4.5";
 export const DEFAULT_COLLECTOR_PORT = 8788;
@@ -621,10 +622,12 @@ export function createCollectorServer({
   summarizer = summarizeHackerNewsStories,
   movieCollector = createEnglishMovieCollector(),
   calendarCollector = collectMacCalendarEvents,
+  libraryCollector = collectAgentNoteLibrary,
 } = {}) {
   if (!token) throw new Error("GROK_X_COLLECTOR_TOKEN is required");
   let xInFlight;
   let calendarInFlight;
+  let libraryInFlight;
   const summaryInFlight = new Map();
 
   return createServer(async (request, response) => {
@@ -674,6 +677,20 @@ export function createCollectorServer({
       } catch {
         jsonResponse(response, 503, {
           error: "Calendar events are temporarily unavailable",
+        });
+      }
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/agent-note-library") {
+      libraryInFlight ??= libraryCollector().finally(() => {
+        libraryInFlight = undefined;
+      });
+      try {
+        jsonResponse(response, 200, await libraryInFlight);
+      } catch {
+        jsonResponse(response, 503, {
+          error: "Agent-note library is temporarily unavailable",
         });
       }
       return;

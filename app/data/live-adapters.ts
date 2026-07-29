@@ -21,6 +21,7 @@ import type {
   DashboardData,
   HackerNewsItem,
   HourForecast,
+  LibraryNote,
   Movie,
   NewsItem,
   SourceName,
@@ -792,6 +793,46 @@ async function fetchCalendar(): Promise<AdapterResult<CalendarEvent[]>> {
   };
 }
 
+function isLibraryNote(value: unknown): value is LibraryNote {
+  if (!value || typeof value !== "object") return false;
+  const note = value as Partial<LibraryNote>;
+  return (
+    typeof note.id === "string" &&
+    typeof note.title === "string" &&
+    typeof note.savedAt === "string" &&
+    Number.isFinite(Date.parse(note.savedAt)) &&
+    Array.isArray(note.tags) &&
+    note.tags.every((tag) => typeof tag === "string") &&
+    typeof note.summary === "string" &&
+    typeof note.content === "string"
+  );
+}
+
+async function fetchLibrary(): Promise<AdapterResult<LibraryNote[]>> {
+  const bridgeUrl = getLocalBridgeUrl("AGENT_NOTE_LIBRARY_FEED_URL");
+  const collectorToken = getEnvironmentValue("GROK_X_COLLECTOR_TOKEN");
+  if (!bridgeUrl || !collectorToken) {
+    throw new Error("Local Agent-note helper is unavailable");
+  }
+
+  const response = await fetchWithTimeout(
+    bridgeUrl,
+    30_000,
+    { authorization: `Bearer ${collectorToken}` },
+  );
+  const payload = (await response.json()) as { items?: unknown[] };
+  if (!Array.isArray(payload.items)) {
+    throw new Error("Agent-note helper returned invalid data");
+  }
+  const items = payload.items.filter(isLibraryNote);
+  return {
+    value: items,
+    status: items.length
+      ? `Agent-note · ${items.length} saved`
+      : "Agent-note · No recent notes",
+  };
+}
+
 async function resolved<T>(
   live: Promise<AdapterResult<T>>,
   fallback: T,
@@ -805,7 +846,8 @@ async function resolved<T>(
 }
 
 export async function getLiveDashboard(): Promise<DashboardData> {
-  const [x, hn, tech, market, weather, calendar, movies] = await Promise.all([
+  const [x, hn, tech, market, weather, calendar, movies, library] =
+    await Promise.all([
     resolved(fetchXExplore(), sampleData.trends, "Saved Trending AI"),
     resolved(fetchHackerNews(), sampleData.hnTrends, "Saved Hacker News"),
     resolved(fetchTechNews(), sampleData.techNews, "Saved feeds"),
@@ -813,7 +855,8 @@ export async function getLiveDashboard(): Promise<DashboardData> {
     resolved(fetchWeather(), sampleData.weather, "Saved forecast"),
     resolved(fetchCalendar(), sampleData.schedule, "Saved schedule"),
     resolved(fetchMovies(), sampleData.movies, "Saved Recently Added"),
-  ]);
+    resolved(fetchLibrary(), sampleData.library, "Agent-note unavailable"),
+    ]);
 
   return {
     savedAt: new Date().toISOString(),
@@ -826,6 +869,7 @@ export async function getLiveDashboard(): Promise<DashboardData> {
       weather: weather.status,
       calendar: calendar.status,
       movies: movies.status,
+      library: library.status,
     },
     trends: x.value,
     hnTrends: hn.value,
@@ -834,5 +878,6 @@ export async function getLiveDashboard(): Promise<DashboardData> {
     weather: weather.value,
     schedule: calendar.value,
     movies: movies.value,
+    library: library.value,
   };
 }

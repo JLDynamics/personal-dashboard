@@ -61,6 +61,17 @@ function formatRefreshTime(value: string, timeZone: string) {
   }).format(date);
 }
 
+function formatLibraryTime(value: string, timeZone: string) {
+  return new Intl.DateTimeFormat("en-CA", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone,
+  }).format(new Date(value));
+}
+
 function localDate(timeZone: string) {
   return new Intl.DateTimeFormat("en-CA", {
     weekday: "long",
@@ -308,6 +319,75 @@ export function Dashboard() {
                 </a>
               ))}
             </div>
+          </section>
+
+          <section className="card library-card">
+            <SectionHeading
+              eyebrow="My Library"
+              title="Past 7 Days"
+              meta={data.sourceStatus.library}
+            />
+            {data.library.length ? (
+              <div className="library-list">
+                {data.library.map((note) => (
+                  <details className="library-note" key={note.id}>
+                    <summary>
+                      <span className="library-note-main">
+                        <span className="library-note-meta">
+                          <time dateTime={note.savedAt}>
+                            {formatLibraryTime(
+                              note.savedAt,
+                              data.weather.timeZone,
+                            )}
+                          </time>
+                          <span className="meta-separator">·</span>
+                          <span>
+                            {note.tags.length
+                              ? `${note.tags.length} ${note.tags.length === 1 ? "tag" : "tags"}`
+                              : "No tags"}
+                          </span>
+                        </span>
+                        <span className="library-note-title">{note.title}</span>
+                        <span className="library-note-summary">
+                          {note.summary}
+                        </span>
+                        {note.tags.length ? (
+                          <span className="library-tags" aria-label="Note tags">
+                            {note.tags.map((tag) => (
+                              <span className="library-tag" key={tag}>
+                                {tag}
+                              </span>
+                            ))}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="library-disclosure" aria-hidden="true">
+                        ›
+                      </span>
+                    </summary>
+                    <div className="library-note-full">
+                      <span className="library-note-full-label">
+                        Full Markdown note
+                      </span>
+                      <pre>{note.content}</pre>
+                    </div>
+                  </details>
+                ))}
+              </div>
+            ) : (
+              <div className="library-state">
+                <strong>
+                  {data.sourceStatus.library.includes("unavailable")
+                    ? "Library unavailable"
+                    : "Nothing saved this week"}
+                </strong>
+                <p>
+                  {data.sourceStatus.library.includes("unavailable")
+                    ? "Agent-note couldn’t be reached. The rest of your dashboard will keep working."
+                    : "No notes were saved in Agent-note during the past 7 days."}
+                </p>
+              </div>
+            )}
           </section>
         </div>
 

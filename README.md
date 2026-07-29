@@ -1,7 +1,7 @@
 # Local Daily Dashboard
 
 A polished, local-first daily briefing for AI, technology, weather, markets,
-calendar events, and newly added movies. The dashboard shows saved data
+calendar events, your recent Agent-note library, and newly added movies. The dashboard shows saved data
 immediately, refreshes its sources once when opened, and refreshes again only
 when you press **Refresh now**.
 
@@ -19,6 +19,7 @@ The application is intentionally personal and local:
 | --- | --- |
 | Trending AI | Three current X stories collected through an authenticated local Grok CLI, plus three AI stories selected from Hacker News `topstories` |
 | Tech News | Five stories from The Verge's public Most Popular list, three Wccftech Trending stories, and three recent stories each from MobileSyrup and iPhone in Canada |
+| My Library · Past 7 Days | Recent normal notes from Agent-note, with title, saved time, tags, a deterministic short preview, and the guarded full Markdown note |
 | Weather | Open-Meteo using configurable coordinates, label, and time zone |
 | Tesla | Yahoo Finance's keyless TSLA five-day chart endpoint |
 | Schedule | Up to eight upcoming macOS Calendar events from the next seven days |
@@ -39,6 +40,8 @@ boost on later refreshes.
 - Google Chrome for live YFSP movie extraction
 - An installed and authenticated Grok CLI for live X collection and Grok
   summaries
+- Agent-note in the sibling `../Agent-note` folder, or an explicit
+  `AGENT_NOTE_PROJECT_DIR`, for the optional My Library card
 
 The dashboard still starts when optional local capabilities are unavailable.
 It keeps the last successful cards or bundled sample data for those sections.
@@ -71,6 +74,12 @@ If the Grok executable is not on your `PATH`, add its absolute path:
 GROK_CLI_PATH=/absolute/path/to/grok
 ```
 
+If Agent-note is stored elsewhere, add its project path:
+
+```dotenv
+AGENT_NOTE_PROJECT_DIR=/absolute/path/to/Agent-note
+```
+
 Local environment files are ignored by Git.
 
 ## How refresh works
@@ -90,6 +99,9 @@ cache. The HTTP response itself is marked `no-store`.
 
 The dashboard does not use a model to rank ordinary RSS, weather, market, or
 calendar data.
+
+My Library does not invoke a model. Its preview is a short deterministic excerpt
+from the normal-note text returned by Agent-note.
 
 The local helper uses Grok for three bounded operations:
 
@@ -117,6 +129,20 @@ Birthdays, subscribed holiday calendars, Siri suggestions, and scheduled
 reminders are excluded. If permission is denied, the Schedule card keeps its
 last successful view.
 
+## Agent-note privacy
+
+The local helper invokes Agent-note's existing JSON CLI for `recent --days 7`
+and its guarded `read --path` operation. Agent-note remains responsible for its
+configured notes folder, excluding raw conversation sources, and refusing
+outside or non-Markdown paths. Note paths and the helper bearer token are not
+sent to browser code.
+
+The browser stores the successful weekly library cards, including their full
+Markdown note text, in the dashboard's local cache so an existing view survives
+a temporary Agent-note outage. That cache stays in the current browser profile
+on this computer and is replaced when Agent-note next returns a successful
+result.
+
 ## Movie-source boundary
 
 The movie helper reads only public listing and detail-page metadata. It does not
@@ -135,6 +161,7 @@ scripts/
   run-local.mjs             starts the local helper and app together
   grok-x-collector.mjs      token-protected loopback helper
   calendar-events.m         minimal macOS EventKit reader
+  agent-note-library.mjs    Agent-note CLI adapter for weekly notes
   yfsp-recent.mjs           public movie-list extraction
 tests/                      parser, selector, security, and SSR tests
 worker/index.ts             vinext worker entry point

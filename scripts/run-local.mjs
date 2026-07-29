@@ -13,6 +13,7 @@ const token = randomBytes(32).toString("hex");
 const collectorUrl = `http://127.0.0.1:${port}/x-trending-ai`;
 const movieUrl = `http://127.0.0.1:${port}/yfsp-recent-movies`;
 const calendarUrl = `http://127.0.0.1:${port}/calendar-events`;
+const libraryUrl = `http://127.0.0.1:${port}/agent-note-library`;
 const environment = {
   ...process.env,
   GROK_X_COLLECTOR_PORT: port,
@@ -20,6 +21,7 @@ const environment = {
   GROK_X_COLLECTOR_URL: collectorUrl,
   YFSP_MOVIE_FEED_URL: movieUrl,
   MACOS_CALENDAR_FEED_URL: calendarUrl,
+  AGENT_NOTE_LIBRARY_FEED_URL: libraryUrl,
 };
 
 let stopping = false;

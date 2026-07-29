@@ -13,6 +13,7 @@ export const sampleData: DashboardData = {
     weather: "Saved forecast",
     movies: "Validated saved set",
     calendar: "Saved schedule",
+    library: "Agent-note unavailable",
   },
   trends: [
     {
@@ -163,6 +164,7 @@ export const sampleData: DashboardData = {
     ],
   },
   schedule: [],
+  library: [],
   movies: [
     {
       id: "yfsp-wEoD5FIyEd3",

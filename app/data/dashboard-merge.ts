@@ -1,5 +1,41 @@
 import type { DashboardData } from "./types";
 
+type LibraryNote = DashboardData["library"][number];
+type LegacyLibraryNote = Partial<LibraryNote> & { preview?: unknown };
+
+export function normalizeLibraryNotes(value: unknown): LibraryNote[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    const note = candidate as LegacyLibraryNote;
+    const summary =
+      typeof note.summary === "string" && note.summary.trim()
+        ? note.summary.trim()
+        : typeof note.preview === "string"
+          ? note.preview.trim()
+          : "";
+    if (
+      typeof note.id !== "string" ||
+      typeof note.title !== "string" ||
+      typeof note.savedAt !== "string" ||
+      !Number.isFinite(Date.parse(note.savedAt)) ||
+      !Array.isArray(note.tags) ||
+      !note.tags.every((tag) => typeof tag === "string") ||
+      typeof note.content !== "string" ||
+      !summary
+    ) {
+      return [];
+    }
+    return [{
+      id: note.id,
+      title: note.title,
+      savedAt: note.savedAt,
+      tags: note.tags,
+      summary,
+      content: note.content,
+    }];
+  });
+}
+
 function mergeUniqueBy<T>(
   next: T[],
   saved: T[],

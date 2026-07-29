@@ -1,5 +1,8 @@
 import { sampleData } from "./sample-data";
-import { mergeTrendingSources } from "./dashboard-merge";
+import {
+  mergeTrendingSources,
+  normalizeLibraryNotes,
+} from "./dashboard-merge";
 import {
   candidatesForOptionalAiReview,
   filterNewAiCandidates,
@@ -65,6 +68,9 @@ function normalizeSavedDashboard(saved: DashboardData): DashboardData {
       ...saved.weather,
     },
     schedule: saved.schedule ?? sampleData.schedule,
+    library: normalizeLibraryNotes(
+      (saved as DashboardData & { library?: unknown }).library,
+    ),
     movies: saved.movies.map((movie) => ({
       ...movie,
       ...canonicalMovies.get(movie.id),
@@ -132,6 +138,8 @@ export async function refreshDashboard(
     liveData.sourceStatus.movies === "Saved Recently Added";
   const calendarUnavailable =
     liveData.sourceStatus.calendar === "Saved schedule";
+  const libraryUnavailable =
+    liveData.sourceStatus.library === "Agent-note unavailable";
   const filteredAi = filterNewAiCandidates(
     xUnavailable ? [] : liveData.trends,
     new Set(refreshMetadata.seenFingerprints),
@@ -168,8 +176,13 @@ export async function refreshDashboard(
     },
     techNews: diverseTechNews,
     schedule: calendarUnavailable ? current.schedule : liveData.schedule,
+    library: libraryUnavailable ? current.library : liveData.library,
     movies: moviesUnavailable ? current.movies : liveData.movies.slice(0, 3),
   };
+
+  if (libraryUnavailable && current.library.length) {
+    next.sourceStatus.library = "Saved library · Agent-note unavailable";
+  }
 
   window.localStorage.setItem(CACHE_KEY, JSON.stringify(next));
   window.localStorage.setItem(

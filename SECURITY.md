@@ -20,6 +20,12 @@ other personal data.
   browser code.
 - Calendar access is read-only at the application level. Event notes,
   attendees, meeting links, and editing are not used.
+- Agent-note access uses its existing `recent` command and guarded note reads.
+  Raw conversation sources, paths outside the configured notes folder, and
+  non-Markdown files remain blocked by Agent-note. Note paths and the helper
+  bearer token are not returned to the browser.
+- Successful weekly library cards include full note text in the dashboard's
+  browser-local cache so the last good view can survive a temporary outage.
 - `.env*`, local build state, compiled helpers, logs, and browser caches are
   excluded from version control.
 

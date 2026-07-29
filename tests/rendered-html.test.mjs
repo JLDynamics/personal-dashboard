@@ -38,6 +38,10 @@ test("server-renders the complete personal dashboard", async () => {
   assert.doesNotMatch(html, /Two independent rankings · 6 stories/);
   assert.doesNotMatch(html, /Builder brief|New methods/);
   assert.match(html, /Tech news/);
+  assert.match(html, /My Library/);
+  assert.match(html, /Past 7 Days/);
+  assert.match(html, /Library unavailable/);
+  assert.doesNotMatch(html, /Ask My Dashboard/);
   assert.match(html, /Tesla/);
   assert.match(html, /Schedule/);
   assert.match(html, /No upcoming events in the next 7 days/);
@@ -101,9 +105,10 @@ test("server-renders the complete personal dashboard", async () => {
 });
 
 test("removes starter-only files and keeps the live-source boundary", async () => {
-  const [page, layout, packageJson, adapters, liveAdapters, hackerNews, route, refreshPolicy, viteConfig, collector, calendarCollector] = await Promise.all([
+  const [page, layout, dashboard, packageJson, adapters, liveAdapters, hackerNews, route, refreshPolicy, viteConfig, collector, calendarCollector, agentNoteLibrary] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/dashboard.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../app/data/adapters.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/data/live-adapters.ts", import.meta.url), "utf8"),
@@ -113,6 +118,7 @@ test("removes starter-only files and keeps the live-source boundary", async () =
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
     readFile(new URL("../scripts/grok-x-collector.mjs", import.meta.url), "utf8"),
     readFile(new URL("../scripts/calendar-collector.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/agent-note-library.mjs", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /<Dashboard \/>/);
@@ -147,6 +153,26 @@ test("removes starter-only files and keeps the live-source boundary", async () =
   assert.match(viteConfig, /vars: localCollectorVars/);
   assert.match(liveAdapters, /YFSP_MOVIE_FEED_URL/);
   assert.match(liveAdapters, /MACOS_CALENDAR_FEED_URL/);
+  assert.match(liveAdapters, /AGENT_NOTE_LIBRARY_FEED_URL/);
+  assert.match(viteConfig, /AGENT_NOTE_LIBRARY_FEED_URL/);
+  assert.match(collector, /agent-note-library/);
+  assert.match(agentNoteLibrary, /\["recent", "--days", "7"\]/);
+  assert.match(agentNoteLibrary, /\["read", "--path", note\.path\]/);
+  assert.match(agentNoteLibrary, /execFile/);
+  assert.match(agentNoteLibrary, /summary:\s*storedSummary/);
+  assert.match(dashboard, /\{note\.summary\}/);
+  assert.doesNotMatch(dashboard, /\{note\.preview\}/);
+  assert.doesNotMatch(agentNoteLibrary, /parse_frontmatter|notes_folder/);
+  assert.equal(
+    dashboard.indexOf('className="card tech-card"') <
+      dashboard.indexOf('className="card library-card"'),
+    true,
+  );
+  assert.equal(
+    dashboard.indexOf('className="card library-card"') <
+      dashboard.indexOf("dashboard-column-side"),
+    true,
+  );
   assert.match(calendarCollector, /EventKit/);
   assert.match(calendarCollector, /CALENDAR_EVENT_LIMIT = 8/);
   assert.match(route, /getLiveDashboard/);

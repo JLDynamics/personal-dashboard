@@ -67,6 +67,15 @@ export type CalendarEvent = {
   location?: string;
 };
 
+export type LibraryNote = {
+  id: string;
+  title: string;
+  savedAt: string;
+  tags: string[];
+  summary: string;
+  content: string;
+};
+
 export type DashboardData = {
   savedAt: string;
   profile: {
@@ -80,6 +89,7 @@ export type DashboardData = {
     weather: string;
     movies: string;
     calendar: string;
+    library: string;
   };
   trends: NewsItem[];
   hnTrends: HackerNewsItem[];
@@ -105,4 +115,5 @@ export type DashboardData = {
   };
   schedule: CalendarEvent[];
   movies: Movie[];
+  library: LibraryNote[];
 };
