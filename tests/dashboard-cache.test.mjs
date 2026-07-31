@@ -23,7 +23,7 @@ function liveSnapshot() {
     weather: "Open-Meteo · live",
     movies: "YFSP · live",
     calendar: "macOS Calendar · live",
-    library: "Agent-note · 1 note",
+    library: "Local notes · 1 saved",
   };
   snapshot.library = [
     {
@@ -70,6 +70,23 @@ test("SQLite cache keeps one snapshot and per-source refresh state", () => {
       new Date(library.nextRefreshAt).getTime(),
       refreshedAt.getTime() + LIBRARY_REFRESH_MS,
     );
+    for (const source of ["market", "weather", "calendar", "movies"]) {
+      const state = cache
+        .readSourceStates()
+        .find((row) => row.source === source);
+      assert.equal(
+        new Date(state.nextRefreshAt).getTime(),
+        refreshedAt.getTime() + NEWS_REFRESH_MS,
+      );
+      assert.equal(cache.isScopeDue(source, refreshedAt), false);
+      assert.equal(
+        cache.isScopeDue(
+          source,
+          new Date(refreshedAt.getTime() + NEWS_REFRESH_MS),
+        ),
+        true,
+      );
+    }
     assert.equal(cache.isScopeDue("news", refreshedAt), false);
     assert.equal(
       cache.isScopeDue(
@@ -97,6 +114,25 @@ test("SQLite cache keeps one snapshot and per-source refresh state", () => {
       "A newly selected MobileSyrup story",
     );
     assert.equal(cache.readSnapshot().library[0].id, "note-1");
+
+    const weatherChanged = structuredClone(changed);
+    weatherChanged.savedAt = "2026-07-29T18:00:00.000Z";
+    weatherChanged.weather.temperature += 1;
+    const weatherResult = cache.storeRefresh(
+      weatherChanged,
+      "weather",
+      new Date(weatherChanged.savedAt),
+    );
+    assert.deepEqual(weatherResult.refreshedSources, ["weather"]);
+    assert.deepEqual(weatherResult.changedSources, ["weather"]);
+    assert.equal(
+      cache.readSnapshot().weather.temperature,
+      weatherChanged.weather.temperature,
+    );
+    assert.equal(
+      cache.readSnapshot().techNews[0].title,
+      "A newly selected MobileSyrup story",
+    );
   } finally {
     cache.close();
     rmSync(directory, { recursive: true, force: true });

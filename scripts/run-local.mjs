@@ -10,13 +10,12 @@ if (mode !== "dev" && mode !== "start") {
 
 const collectorPort = process.env.GROK_X_COLLECTOR_PORT ?? "8788";
 const daemonPort = process.env.DASHBOARD_DAEMON_PORT ?? "8790";
-const mcpPort = process.env.DASHBOARD_MCP_PORT ?? "8791";
 const collectorToken = randomBytes(32).toString("hex");
 const dashboardToken = randomBytes(32).toString("hex");
 const collectorUrl = `http://127.0.0.1:${collectorPort}/x-trending-ai`;
 const movieUrl = `http://127.0.0.1:${collectorPort}/yfsp-recent-movies`;
 const calendarUrl = `http://127.0.0.1:${collectorPort}/calendar-events`;
-const libraryUrl = `http://127.0.0.1:${collectorPort}/agent-note-library`;
+const libraryUrl = `http://127.0.0.1:${collectorPort}/local-notes-library`;
 const cacheUrl = `http://127.0.0.1:${daemonPort}`;
 const environment = {
   ...process.env,
@@ -25,9 +24,8 @@ const environment = {
   GROK_X_COLLECTOR_URL: collectorUrl,
   YFSP_MOVIE_FEED_URL: movieUrl,
   MACOS_CALENDAR_FEED_URL: calendarUrl,
-  AGENT_NOTE_LIBRARY_FEED_URL: libraryUrl,
+  DASHBOARD_NOTES_LIBRARY_FEED_URL: libraryUrl,
   DASHBOARD_DAEMON_PORT: daemonPort,
-  DASHBOARD_MCP_PORT: mcpPort,
   DASHBOARD_CACHE_URL: cacheUrl,
   DASHBOARD_LOCAL_TOKEN: dashboardToken,
 };
@@ -106,18 +104,6 @@ try {
     `http://127.0.0.1:${daemonPort}/health`,
     dashboardToken,
     daemon,
-  );
-
-  const mcp = spawnChild(process.execPath, [
-    "--import",
-    "tsx",
-    "scripts/dashboard-mcp.ts",
-  ]);
-  await waitForService(
-    `http://127.0.0.1:${mcpPort}/health`,
-    undefined,
-    mcp,
-    200,
   );
 
   app = spawn("vinext", [mode], {

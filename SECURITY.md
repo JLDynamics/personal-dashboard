@@ -20,10 +20,11 @@ other personal data.
   browser code.
 - Calendar access is read-only at the application level. Event notes,
   attendees, meeting links, and editing are not used.
-- Agent-note access uses its existing `recent` command and guarded note reads.
-  Raw conversation sources, paths outside the configured notes folder, and
-  non-Markdown files remain blocked by Agent-note. Note paths and the helper
-  bearer token are not returned to the browser.
+- Local note access is read-only and limited to regular Markdown files beneath
+  the canonical `DASHBOARD_NOTES_FOLDER` root. Hidden directories such as
+  `.raw`, hidden files, symlinks, outside paths, non-Markdown files, and
+  oversized or unreadable files are skipped. Note paths and the helper bearer
+  token are not returned to the browser.
 - Successful weekly library cards include full note text in the dashboard's
   browser-local cache so the last good view can survive a temporary outage.
 - `.env*`, local build state, compiled helpers, logs, and browser caches are
@@ -36,8 +37,8 @@ helper port directly to the public internet.
 
 The Claude connector uses a separate loopback-only listener and exposes only
 the read-only `ask_dashboard` tool. It reads the existing SQLite snapshot and
-cannot request a refresh, browse the web, invoke Agent-note, open arbitrary
-files, or write data.
+cannot request a refresh, browse the web, invoke the local notes reader, open
+arbitrary files, or write data.
 
 The remote listener remains disabled unless all OAuth settings are present. It
 requires:

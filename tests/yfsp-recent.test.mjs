@@ -54,7 +54,9 @@ test("rejects missing, malformed, or non-YFSP poster cards", () => {
           genre: "Drama",
         })}</div>`,
       ),
-    /exactly three/,
+    (error) =>
+      error?.stage === "validation" &&
+      error?.code === "three_cards_required",
   );
 });
 

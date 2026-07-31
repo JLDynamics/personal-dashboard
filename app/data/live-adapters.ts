@@ -16,6 +16,7 @@ import {
   extractReadableArticleText,
   publicArticleUrl,
 } from "./article-content";
+import { resolveDashboardTimeZone } from "./dashboard-time-zone";
 import type {
   CalendarEvent,
   DashboardData,
@@ -30,6 +31,7 @@ import type {
 const USER_AGENT = "LocalDailyDashboard/0.1 (local-first dashboard)";
 const REQUEST_TIMEOUT_MS = 9_000;
 const GROK_COLLECTOR_TIMEOUT_MS = 45_000;
+const MOVIE_PIPELINE_TIMEOUT_MS = 60_000;
 
 type FeedEntry = {
   id: string;
@@ -43,6 +45,52 @@ type AdapterResult<T> = {
   value: T;
   status: string;
 };
+
+type MovieDiagnosticStage =
+  | "adapter"
+  | "scrape"
+  | "validation";
+
+type MovieAdapterDiagnostic = {
+  status: "never" | "ok" | "error";
+  lastSuccessAt?: string;
+  lastError?: {
+    stage: MovieDiagnosticStage;
+    code: string;
+    occurredAt: string;
+  };
+};
+
+let movieAdapterDiagnostic: MovieAdapterDiagnostic = { status: "never" };
+
+function recordMovieAdapterSuccess() {
+  movieAdapterDiagnostic = {
+    ...movieAdapterDiagnostic,
+    status: "ok",
+    lastSuccessAt: new Date().toISOString(),
+  };
+}
+
+function recordMovieAdapterFailure(
+  stage: MovieDiagnosticStage,
+  code: string,
+) {
+  movieAdapterDiagnostic = {
+    ...movieAdapterDiagnostic,
+    status: "error",
+    lastError: {
+      stage,
+      code,
+      occurredAt: new Date().toISOString(),
+    },
+  };
+}
+
+export function getLiveAdapterDiagnostics() {
+  return {
+    movies: structuredClone(movieAdapterDiagnostic),
+  };
+}
 
 const TECH_FEEDS: Array<{ source: SourceName; url: string }> = [
   { source: "MobileSyrup", url: "https://mobilesyrup.com/feed/" },
@@ -117,12 +165,13 @@ function weatherSettings() {
     location:
       getEnvironmentValue("DASHBOARD_WEATHER_LOCATION") ??
       "Sample location",
-    timeZone:
-      getEnvironmentValue("DASHBOARD_TIME_ZONE") ?? "UTC",
+    timeZone: resolveDashboardTimeZone(
+      getEnvironmentValue("DASHBOARD_TIME_ZONE"),
+    ),
   };
 }
 
-async function fetchWithTimeout(
+async function fetchResponseWithTimeout(
   url: string,
   timeoutMs = REQUEST_TIMEOUT_MS,
   headers: Record<string, string> = {},
@@ -144,13 +193,28 @@ async function fetchWithTimeout(
       },
       signal: controller.signal,
     });
-    if (!response.ok) {
-      throw new Error(`Source returned ${response.status}`);
-    }
     return response;
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function fetchWithTimeout(
+  url: string,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+  headers: Record<string, string> = {},
+  init: RequestInit = {},
+): Promise<Response> {
+  const response = await fetchResponseWithTimeout(
+    url,
+    timeoutMs,
+    headers,
+    init,
+  );
+  if (!response.ok) {
+    throw new Error(`Source returned ${response.status}`);
+  }
+  return response;
 }
 
 function decodeXml(value: string): string {
@@ -751,29 +815,63 @@ function isMovie(value: unknown): value is Movie {
 async function fetchMovies(): Promise<AdapterResult<Movie[]>> {
   const bridgeUrl = getLocalBridgeUrl("YFSP_MOVIE_FEED_URL");
   const collectorToken = getEnvironmentValue("GROK_X_COLLECTOR_TOKEN");
-  if (bridgeUrl && collectorToken) {
-    try {
-      const payload = (await (
-        await fetchWithTimeout(
-          bridgeUrl,
-          20_000,
-          { authorization: `Bearer ${collectorToken}` },
-        )
-      ).json()) as
-        | Movie[]
-        | { items?: unknown[] };
-      const items = Array.isArray(payload)
-        ? payload.filter(isMovie)
-        : (payload.items ?? []).filter(isMovie);
-      if (items.length === 3) {
-        return {
-          value: items,
-          status: "Live YFSP Recently Added",
+  if (!bridgeUrl || !collectorToken) {
+    recordMovieAdapterFailure("adapter", "bridge_unconfigured");
+    return {
+      value: sampleData.movies,
+      status: "Saved Recently Added",
+    };
+  }
+
+  try {
+    const response = await fetchResponseWithTimeout(
+      bridgeUrl,
+      MOVIE_PIPELINE_TIMEOUT_MS,
+      { authorization: `Bearer ${collectorToken}` },
+    );
+    const payload = (await response.json()) as
+      | Movie[]
+      | {
+          items?: unknown[];
+          diagnostic?: {
+            lastError?: {
+              stage?: unknown;
+              code?: unknown;
+            };
+          };
         };
-      }
-    } catch {
-      // Preserve the browser's last successful Recently Added list.
+    if (!response.ok) {
+      const lastError = Array.isArray(payload)
+        ? undefined
+        : payload.diagnostic?.lastError;
+      const stage =
+        lastError?.stage === "scrape" || lastError?.stage === "validation"
+          ? lastError.stage
+          : "adapter";
+      const code =
+        typeof lastError?.code === "string" &&
+        /^[a-z][a-z0-9_]{0,63}$/.test(lastError.code)
+          ? lastError.code
+          : "upstream_failed";
+      recordMovieAdapterFailure(stage, code);
+      return {
+        value: sampleData.movies,
+        status: "Saved Recently Added",
+      };
     }
+    const items = Array.isArray(payload)
+      ? payload.filter(isMovie)
+      : (payload.items ?? []).filter(isMovie);
+    if (items.length === 3) {
+      recordMovieAdapterSuccess();
+      return {
+        value: items,
+        status: "Live YFSP Recently Added",
+      };
+    }
+    recordMovieAdapterFailure("adapter", "invalid_payload");
+  } catch {
+    recordMovieAdapterFailure("adapter", "bridge_request_failed");
   }
 
   return {
@@ -835,10 +933,10 @@ function isLibraryNote(value: unknown): value is LibraryNote {
 }
 
 async function fetchLibrary(): Promise<AdapterResult<LibraryNote[]>> {
-  const bridgeUrl = getLocalBridgeUrl("AGENT_NOTE_LIBRARY_FEED_URL");
+  const bridgeUrl = getLocalBridgeUrl("DASHBOARD_NOTES_LIBRARY_FEED_URL");
   const collectorToken = getEnvironmentValue("GROK_X_COLLECTOR_TOKEN");
   if (!bridgeUrl || !collectorToken) {
-    throw new Error("Local Agent-note helper is unavailable");
+    throw new Error("Local notes helper is unavailable");
   }
 
   const response = await fetchWithTimeout(
@@ -848,14 +946,14 @@ async function fetchLibrary(): Promise<AdapterResult<LibraryNote[]>> {
   );
   const payload = (await response.json()) as { items?: unknown[] };
   if (!Array.isArray(payload.items)) {
-    throw new Error("Agent-note helper returned invalid data");
+    throw new Error("Local notes helper returned invalid data");
   }
   const items = payload.items.filter(isLibraryNote);
   return {
     value: items,
     status: items.length
-      ? `Agent-note · ${items.length} saved`
-      : "Agent-note · No recent notes",
+      ? `Local notes · ${items.length} saved`
+      : "Local notes · No recent notes",
   };
 }
 
@@ -871,7 +969,14 @@ async function resolved<T>(
   }
 }
 
-export type DashboardRefreshScope = "full" | "news" | "library";
+export type DashboardRefreshScope =
+  | "full"
+  | "news"
+  | "market"
+  | "weather"
+  | "calendar"
+  | "movies"
+  | "library";
 
 export async function getLiveDashboardForScope(
   current: DashboardData,
@@ -907,7 +1012,7 @@ export async function getLiveDashboardForScope(
     const library = await resolved(
       fetchLibrary(),
       current.library,
-      "Agent-note unavailable",
+      "Notes folder unavailable",
     );
     return {
       ...current,
@@ -918,6 +1023,78 @@ export async function getLiveDashboardForScope(
         library: library.status,
       },
       library: library.value,
+    };
+  }
+
+  if (scope === "market") {
+    const market = await resolved(
+      fetchTesla(),
+      current.tesla,
+      "Saved quote",
+    );
+    return {
+      ...current,
+      savedAt: new Date().toISOString(),
+      profile: dashboardProfile(),
+      sourceStatus: {
+        ...current.sourceStatus,
+        market: market.status,
+      },
+      tesla: market.value,
+    };
+  }
+
+  if (scope === "weather") {
+    const weather = await resolved(
+      fetchWeather(),
+      current.weather,
+      "Saved forecast",
+    );
+    return {
+      ...current,
+      savedAt: new Date().toISOString(),
+      profile: dashboardProfile(),
+      sourceStatus: {
+        ...current.sourceStatus,
+        weather: weather.status,
+      },
+      weather: weather.value,
+    };
+  }
+
+  if (scope === "calendar") {
+    const calendar = await resolved(
+      fetchCalendar(),
+      current.schedule,
+      "Saved schedule",
+    );
+    return {
+      ...current,
+      savedAt: new Date().toISOString(),
+      profile: dashboardProfile(),
+      sourceStatus: {
+        ...current.sourceStatus,
+        calendar: calendar.status,
+      },
+      schedule: calendar.value,
+    };
+  }
+
+  if (scope === "movies") {
+    const movies = await resolved(
+      fetchMovies(),
+      current.movies,
+      "Saved Recently Added",
+    );
+    return {
+      ...current,
+      savedAt: new Date().toISOString(),
+      profile: dashboardProfile(),
+      sourceStatus: {
+        ...current.sourceStatus,
+        movies: movies.status,
+      },
+      movies: movies.value,
     };
   }
 
@@ -934,7 +1111,7 @@ export async function getLiveDashboardForScope(
     resolved(fetchWeather(), sampleData.weather, "Saved forecast"),
     resolved(fetchCalendar(), sampleData.schedule, "Saved schedule"),
     resolved(fetchMovies(), sampleData.movies, "Saved Recently Added"),
-    resolved(fetchLibrary(), sampleData.library, "Agent-note unavailable"),
+    resolved(fetchLibrary(), sampleData.library, "Notes folder unavailable"),
     ]);
 
   return {

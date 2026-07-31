@@ -2,15 +2,17 @@ import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-import { collectRecentYfspMovies } from "./yfsp-recent.mjs";
+import {
+  collectRecentYfspMovies,
+  YfspMovieError,
+} from "./yfsp-recent.mjs";
 import { collectMacCalendarEvents } from "./calendar-collector.mjs";
-import { collectAgentNoteLibrary } from "./agent-note-library.mjs";
+import { collectLocalNotesLibrary } from "./local-notes-library.mjs";
 
 export const GROK_MODEL = "grok-4.5";
 export const DEFAULT_COLLECTOR_PORT = 8788;
 export const GROK_TIMEOUT_MS = 40_000;
 export const HN_SUMMARY_TIMEOUT_MS = 35_000;
-export const MOVIE_TRANSLATION_TIMEOUT_MS = 20_000;
 
 const MAX_OUTPUT_BYTES = 1_000_000;
 const DISALLOWED_LOCAL_TOOLS = [
@@ -27,8 +29,6 @@ export const GROK_PROMPT =
   "Search X for the top 3 AI news stories trending right now. For each, return headline, one-sentence summary, and public X link. Skip ads and duplicates. Return JSON only.";
 export const HN_SUMMARY_PROMPT =
   "Summarize each supplied Hacker News article from its full article text in one concise factual sentence. Do not summarize the title or ranking metadata. Do not search, rerank, or add new information. Return JSON only.";
-export const MOVIE_TRANSLATION_PROMPT =
-  "Translate the supplied movie title, genres, and plot summary into natural concise English. Preserve names and facts. Do not search or add information. Return JSON only.";
 
 function cleanText(value) {
   return typeof value === "string"
@@ -337,28 +337,6 @@ export function hackerNewsSummaryArguments(stories) {
   ];
 }
 
-export function movieTranslationArguments(movies) {
-  return [
-    "--model",
-    GROK_MODEL,
-    "--no-memory",
-    "--no-plan",
-    "--no-subagents",
-    "--max-turns",
-    "1",
-    "--permission-mode",
-    "dontAsk",
-    "--disallowed-tools",
-    DISALLOWED_LOCAL_TOOLS,
-    "--disable-web-search",
-    "--output-format",
-    "plain",
-    "--verbatim",
-    "--single",
-    `${MOVIE_TRANSLATION_PROMPT}\nUse each supplied id exactly once and return [{"id":"...","title":"...","genre":"...","description":"..."}] in the same order.\n\nMovies:\n${JSON.stringify(movies)}`,
-  ];
-}
-
 export async function collectTrendingAi({
   execute = executeGrok,
   environment = process.env,
@@ -463,147 +441,43 @@ export async function summarizeHackerNewsStories({
   return validateHackerNewsSummaries(parseGrokCliOutput(stdout), safeStories);
 }
 
-function validateMovieTranslationInput(movies) {
-  if (!Array.isArray(movies) || movies.length !== 3) {
-    throw new Error("Exactly 3 movies are required");
-  }
-  return movies.map((movie) => {
-    if (!movie || typeof movie !== "object") {
-      throw new Error("Movie translation input was invalid");
-    }
-    const id = cleanText(movie.id);
-    const title = cleanText(movie.title);
-    const genre = cleanText(movie.genre);
-    const description = cleanText(movie.description);
-    if (
-      !id ||
-      title.length < 1 ||
-      title.length > 160 ||
-      genre.length < 2 ||
-      genre.length > 120 ||
-      description.length < 20 ||
-      description.length > 500
-    ) {
-      throw new Error("Movie translation input was invalid");
-    }
-    return { id, title, genre, description };
-  });
-}
-
-function translatedMonogram(title) {
-  return title
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((word) => word[0])
-    .join("")
-    .toUpperCase();
-}
-
-export function validateMovieTranslations(payload, movies) {
-  const expected = validateMovieTranslationInput(movies);
-  if (!payload || typeof payload !== "object" || !Array.isArray(payload.items)) {
-    throw new Error("Grok movie translation did not contain an items array");
-  }
-  if (payload.items.length !== expected.length) {
-    throw new Error("Grok must return exactly 3 movie translations");
-  }
-
-  const translated = new Map();
-  const cjkText = /[\u3400-\u9fff\uf900-\ufaff]/u;
-  for (const item of payload.items) {
-    const id =
-      typeof item?.id === "number"
-        ? String(item.id)
-        : cleanText(item?.id);
-    const title = cleanText(item?.title);
-    const genre = cleanText(item?.genre);
-    const description = cleanText(item?.description);
-    if (
-      !expected.some((movie) => movie.id === id) ||
-      translated.has(id) ||
-      title.length < 1 ||
-      title.length > 140 ||
-      genre.length < 2 ||
-      genre.length > 100 ||
-      description.length < 20 ||
-      description.length > 360 ||
-      cjkText.test(`${title} ${genre} ${description}`) ||
-      /https?:\/\//i.test(`${title} ${genre} ${description}`)
-    ) {
-      throw new Error("Grok returned an invalid movie translation");
-    }
-    translated.set(id, { title, genre, description });
-  }
-
-  return {
-    items: movies.map((movie) => {
-      const english = translated.get(movie.id);
-      if (!english) throw new Error("Grok omitted a movie translation");
-      return {
-        ...movie,
-        ...english,
-        posterAlt: `${english.title} poster`,
-        monogram: translatedMonogram(english.title),
-      };
-    }),
-  };
-}
-
-export async function translateMoviesToEnglish({
-  movies,
-  execute = executeGrok,
-  environment = process.env,
-} = {}) {
-  const safeMovies = validateMovieTranslationInput(movies);
-  const executable = environment.GROK_CLI_PATH?.trim() || "grok";
-  const { stdout } = await execute(
-    executable,
-    movieTranslationArguments(safeMovies),
-    {
-      cwd: tmpdir(),
-      env: minimalGrokEnvironment(environment),
-      timeoutMs: MOVIE_TRANSLATION_TIMEOUT_MS,
-    },
-  );
-  return validateMovieTranslations(parseGrokCliOutput(stdout), movies);
-}
-
-export function createEnglishMovieCollector({
+export function createMovieCollector({
   collect = collectRecentYfspMovies,
-  translate = translateMoviesToEnglish,
 } = {}) {
-  let cachedKey = "";
-  let cachedResult;
-  let pendingKey = "";
-  let pending;
+  let diagnostic = { status: "never" };
 
-  return async function collectEnglishMovies() {
-    const result = await collect();
-    const key = JSON.stringify(
-      result.items.map(({ id, title, genre, description }) => ({
-        id,
-        title,
-        genre,
-        description,
-      })),
-    );
-    if (key === cachedKey && cachedResult) return cachedResult;
-    if (key === pendingKey && pending) return pending;
-
-    pendingKey = key;
-    pending = translate({ movies: result.items })
-      .then((translated) => {
-        cachedKey = key;
-        cachedResult = translated;
-        return translated;
-      })
-      .finally(() => {
-        pendingKey = "";
-        pending = undefined;
-      });
-    return pending;
+  async function collectMovies() {
+    try {
+      const result = await collect();
+      if (!Array.isArray(result?.items) || result.items.length !== 3) {
+        throw new YfspMovieError("validation", "three_cards_required");
+      }
+      diagnostic = {
+        ...diagnostic,
+        status: "ok",
+        lastSuccessAt: new Date().toISOString(),
+      };
+      return result;
+    } catch (error) {
+      const stage =
+        error instanceof YfspMovieError ? error.stage : "scrape";
+      const code =
+        error instanceof YfspMovieError ? error.code : "collector_failed";
+      diagnostic = {
+        ...diagnostic,
+        status: "error",
+        lastError: {
+          stage,
+          code,
+          occurredAt: new Date().toISOString(),
+        },
+      };
+      throw error;
+    }
   };
+
+  collectMovies.getDiagnostic = () => structuredClone(diagnostic);
+  return collectMovies;
 }
 
 function jsonResponse(response, status, payload) {
@@ -620,12 +494,13 @@ export function createCollectorServer({
   token,
   collector = collectTrendingAi,
   summarizer = summarizeHackerNewsStories,
-  movieCollector = createEnglishMovieCollector(),
+  movieCollector = createMovieCollector(),
   calendarCollector = collectMacCalendarEvents,
-  libraryCollector = collectAgentNoteLibrary,
+  libraryCollector = collectLocalNotesLibrary,
 } = {}) {
   if (!token) throw new Error("GROK_X_COLLECTOR_TOKEN is required");
   let xInFlight;
+  let movieInFlight;
   let calendarInFlight;
   let libraryInFlight;
   const summaryInFlight = new Map();
@@ -643,6 +518,15 @@ export function createCollectorServer({
       jsonResponse(response, 200, { ok: true, model: GROK_MODEL });
       return;
     }
+    if (request.method === "GET" && url.pathname === "/status") {
+      jsonResponse(response, 200, {
+        movies:
+          typeof movieCollector.getDiagnostic === "function"
+            ? movieCollector.getDiagnostic()
+            : { status: "unavailable" },
+      });
+      return;
+    }
     if (request.method === "GET" && url.pathname === "/x-trending-ai") {
       xInFlight ??= collector().finally(() => {
         xInFlight = undefined;
@@ -658,11 +542,18 @@ export function createCollectorServer({
     }
 
     if (request.method === "GET" && url.pathname === "/yfsp-recent-movies") {
+      movieInFlight ??= movieCollector().finally(() => {
+        movieInFlight = undefined;
+      });
       try {
-        jsonResponse(response, 200, await movieCollector());
+        jsonResponse(response, 200, await movieInFlight);
       } catch {
         jsonResponse(response, 503, {
           error: "Recently Added movies are temporarily unavailable",
+          diagnostic:
+            typeof movieCollector.getDiagnostic === "function"
+              ? movieCollector.getDiagnostic()
+              : undefined,
         });
       }
       return;
@@ -682,7 +573,7 @@ export function createCollectorServer({
       return;
     }
 
-    if (request.method === "GET" && url.pathname === "/agent-note-library") {
+    if (request.method === "GET" && url.pathname === "/local-notes-library") {
       libraryInFlight ??= libraryCollector().finally(() => {
         libraryInFlight = undefined;
       });
@@ -690,7 +581,7 @@ export function createCollectorServer({
         jsonResponse(response, 200, await libraryInFlight);
       } catch {
         jsonResponse(response, 503, {
-          error: "Agent-note library is temporarily unavailable",
+          error: "Local notes library is temporarily unavailable",
         });
       }
       return;

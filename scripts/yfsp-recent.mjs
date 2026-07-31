@@ -14,6 +14,15 @@ const CHROME_CANDIDATES = [
   "chromium",
 ].filter(Boolean);
 
+export class YfspMovieError extends Error {
+  constructor(stage, code) {
+    super(`YFSP movie ${stage} failed`);
+    this.name = "YfspMovieError";
+    this.stage = stage;
+    this.code = code;
+  }
+}
+
 function cleanText(value) {
   return String(value ?? "")
     .replace(/<[^>]+>/g, " ")
@@ -67,7 +76,7 @@ export function parseYfspSynopsis(html, title) {
   );
   const summary = shortenSynopsis(cleaned);
   if (summary.length < 30) {
-    throw new Error(`YFSP synopsis was unavailable for ${title}`);
+    throw new YfspMovieError("validation", "synopsis_unavailable");
   }
   return summary;
 }
@@ -77,7 +86,9 @@ export function parseRecentYfspHtml(
   collectedAt = new Date(),
 ) {
   const start = html.indexOf('id="list-page"');
-  if (start < 0) throw new Error("YFSP Recently Added list was not found");
+  if (start < 0) {
+    throw new YfspMovieError("validation", "recent_list_missing");
+  }
   const section = html.slice(start);
   const cardPattern =
     /<div\b[^>]*class="v-c[^"]*"[^>]*>([\s\S]*?)(?=<div\b[^>]*class="v-c[^"]*"|$)/g;
@@ -145,7 +156,7 @@ export function parseRecentYfspHtml(
   }
 
   if (items.length !== 3) {
-    throw new Error("YFSP did not return exactly three usable movie cards");
+    throw new YfspMovieError("validation", "three_cards_required");
   }
   return { items };
 }
@@ -160,7 +171,7 @@ async function findChrome() {
       // Try the next known local browser path.
     }
   }
-  throw new Error("Chrome or Chromium is required for YFSP Recently Added");
+  throw new YfspMovieError("scrape", "browser_unavailable");
 }
 
 function renderPage(executable, args) {
@@ -203,22 +214,32 @@ export async function collectRecentYfspMovies({
   render = renderPage,
 } = {}) {
   const executable = await findChrome();
-  const listHtml = await render(
-    executable,
-    chromeArguments(YFSP_RECENT_URL, "1920,3000"),
-  );
+  let listHtml;
+  try {
+    listHtml = await render(
+      executable,
+      chromeArguments(YFSP_RECENT_URL, "1920,3000"),
+    );
+  } catch {
+    throw new YfspMovieError("scrape", "list_request_failed");
+  }
   const result = parseRecentYfspHtml(String(listHtml), collectedAt);
 
   await Promise.all(
     result.items.map(async (movie) => {
       const sourceId = movie.sourceId.replace(/^yfsp:/, "");
-      const detailHtml = await render(
-        executable,
-        chromeArguments(
-          `https://www.yfsp.tv/play/${sourceId}`,
-          "1920,1800",
-        ),
-      );
+      let detailHtml;
+      try {
+        detailHtml = await render(
+          executable,
+          chromeArguments(
+            `https://www.yfsp.tv/play/${sourceId}`,
+            "1920,1800",
+          ),
+        );
+      } catch {
+        throw new YfspMovieError("scrape", "detail_request_failed");
+      }
       movie.description = parseYfspSynopsis(
         String(detailHtml),
         movie.title,

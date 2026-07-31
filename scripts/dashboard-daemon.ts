@@ -6,6 +6,7 @@ import {
   DEFAULT_DATABASE_PATH,
 } from "./dashboard-cache.mjs";
 import {
+  getLiveAdapterDiagnostics,
   getLiveDashboardForScope,
   type DashboardRefreshScope,
 } from "../app/data/live-adapters";
@@ -17,8 +18,20 @@ const SCHEDULER_TICK_MS = 60_000;
 const VALID_SCOPES = new Set<DashboardRefreshScope>([
   "full",
   "news",
+  "market",
+  "weather",
+  "calendar",
+  "movies",
   "library",
 ]);
+const SCHEDULED_SCOPES: DashboardRefreshScope[] = [
+  "news",
+  "market",
+  "weather",
+  "calendar",
+  "movies",
+  "library",
+];
 
 function jsonResponse(
   response: ServerResponse,
@@ -76,8 +89,10 @@ export function createDashboardDaemon({
   }
 
   async function runScheduledRefreshes() {
-    if (cache.isScopeDue("news")) await refresh("news");
-    if (cache.isScopeDue("library")) await refresh("library");
+    const dueScopes = SCHEDULED_SCOPES.filter((scope) =>
+      cache.isScopeDue(scope),
+    );
+    await Promise.allSettled(dueScopes.map((scope) => refresh(scope)));
   }
 
   const server = createServer(async (request, response) => {
@@ -111,6 +126,7 @@ export function createDashboardDaemon({
     if (request.method === "GET" && url.pathname === "/status") {
       jsonResponse(response, 200, {
         sources: cache.readSourceStates(),
+        diagnostics: getLiveAdapterDiagnostics(),
       });
       return;
     }

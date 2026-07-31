@@ -139,7 +139,7 @@ export async function refreshDashboard(
   const calendarUnavailable =
     liveData.sourceStatus.calendar === "Saved schedule";
   const libraryUnavailable =
-    liveData.sourceStatus.library === "Agent-note unavailable";
+    liveData.sourceStatus.library === "Notes folder unavailable";
   const filteredAi = filterNewAiCandidates(
     xUnavailable ? [] : liveData.trends,
     new Set(refreshMetadata.seenFingerprints),
@@ -181,7 +181,7 @@ export async function refreshDashboard(
   };
 
   if (libraryUnavailable && current.library.length) {
-    next.sourceStatus.library = "Saved library · Agent-note unavailable";
+    next.sourceStatus.library = "Saved library · Notes folder unavailable";
   }
 
   window.localStorage.setItem(CACHE_KEY, JSON.stringify(next));

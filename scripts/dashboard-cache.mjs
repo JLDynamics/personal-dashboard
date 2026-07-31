@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 export const NEWS_REFRESH_MS = 3 * 60 * 60 * 1_000;
+export const LIVE_SOURCE_REFRESH_MS = NEWS_REFRESH_MS;
 export const LIBRARY_REFRESH_MS = 12 * 60 * 60 * 1_000;
 export const DEFAULT_DATABASE_PATH = resolve(
   process.cwd(),
@@ -20,6 +21,12 @@ const NEWS_SOURCES = [
   "tech:The Verge",
 ];
 const LIBRARY_SOURCES = ["library"];
+const LIVE_CARD_SOURCES = ["market", "weather", "calendar", "movies"];
+const SCHEDULED_SOURCES = [
+  ...NEWS_SOURCES,
+  ...LIVE_CARD_SOURCES,
+  ...LIBRARY_SOURCES,
+];
 
 function stableJson(value) {
   if (Array.isArray(value)) return value.map(stableJson);
@@ -63,8 +70,9 @@ function sourcePayloads(snapshot) {
 
 function sourceNamesForScope(scope) {
   if (scope === "news") return NEWS_SOURCES;
+  if (LIVE_CARD_SOURCES.includes(scope)) return [scope];
   if (scope === "library") return LIBRARY_SOURCES;
-  return [...NEWS_SOURCES, "market", "weather", "calendar", "movies", "library"];
+  return SCHEDULED_SOURCES;
 }
 
 function sourceAvailable(snapshot, source) {
@@ -87,17 +95,15 @@ function sourceAvailable(snapshot, source) {
     return snapshot.sourceStatus.movies !== "Saved Recently Added";
   }
   if (source === "library") {
-    return snapshot.sourceStatus.library !== "Agent-note unavailable";
+    return snapshot.sourceStatus.library !== "Notes folder unavailable";
   }
   return false;
 }
 
 function nextRefreshAt(source, refreshedAt) {
-  const interval = source === "library" ? LIBRARY_REFRESH_MS : NEWS_REFRESH_MS;
-  if (
-    !NEWS_SOURCES.includes(source) &&
-    !LIBRARY_SOURCES.includes(source)
-  ) {
+  const interval =
+    source === "library" ? LIBRARY_REFRESH_MS : LIVE_SOURCE_REFRESH_MS;
+  if (!SCHEDULED_SOURCES.includes(source)) {
     return "";
   }
   return new Date(new Date(refreshedAt).getTime() + interval).toISOString();
@@ -157,9 +163,23 @@ function mergeScope(current, incoming, scope, changedSources) {
       next.techNews = incoming.techNews;
       next.sourceStatus.tech = incoming.sourceStatus.tech;
     }
-  } else if (scope === "library" && changedSources.has("library")) {
-    next.library = incoming.library;
-    next.sourceStatus.library = incoming.sourceStatus.library;
+  } else if (changedSources.has(scope)) {
+    if (scope === "market") {
+      next.tesla = incoming.tesla;
+      next.sourceStatus.market = incoming.sourceStatus.market;
+    } else if (scope === "weather") {
+      next.weather = incoming.weather;
+      next.sourceStatus.weather = incoming.sourceStatus.weather;
+    } else if (scope === "calendar") {
+      next.schedule = incoming.schedule;
+      next.sourceStatus.calendar = incoming.sourceStatus.calendar;
+    } else if (scope === "movies") {
+      next.movies = incoming.movies;
+      next.sourceStatus.movies = incoming.sourceStatus.movies;
+    } else if (scope === "library") {
+      next.library = incoming.library;
+      next.sourceStatus.library = incoming.sourceStatus.library;
+    }
   }
 
   if (changedSources.size) next.savedAt = incoming.savedAt;

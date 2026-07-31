@@ -25,7 +25,7 @@ import {
   DashboardCache,
   DEFAULT_DATABASE_PATH,
 } from "./dashboard-cache.mjs";
-import { askDashboard } from "./dashboard-answer.mjs";
+import { askDashboard, DashboardAnswerState } from "./dashboard-answer.mjs";
 import {
   Auth0JwtVerifier,
   DashboardRemoteSettings,
@@ -45,9 +45,11 @@ const answerSchema = z.object({
 export function buildDashboardMcpServer({
   cache,
   answer = askDashboard,
+  answerState = new DashboardAnswerState(),
 }: {
   cache: DashboardCache;
   answer?: typeof askDashboard;
+  answerState?: DashboardAnswerState;
 }) {
   const server = new McpServer(
     {
@@ -66,13 +68,21 @@ export function buildDashboardMcpServer({
     {
       title: "Ask My Dashboard",
       description:
-        "Answer one question from the latest cached dashboard data using the local Grok CLI.",
+        "Answer one question from the latest cached dashboard data. Trending AI and Tech News lists are formatted directly from that snapshot; other questions use the local Grok CLI.",
       inputSchema: z.object({
         question: z
           .string()
           .min(1)
           .max(1_000)
           .describe("The question to answer from cached dashboard data."),
+        callerId: z
+          .string()
+          .min(1)
+          .max(256)
+          .optional()
+          .describe(
+            "An opaque, stable ID for this caller or conversation. Supply the same value for Tech News follow-ups such as 'show more tech news'.",
+          ),
       }),
       outputSchema: answerSchema,
       annotations: {
@@ -82,7 +92,7 @@ export function buildDashboardMcpServer({
         openWorldHint: false,
       },
     },
-    async ({ question }) => {
+    async ({ question, callerId }) => {
       const snapshot = cache.readSnapshot();
       if (!snapshot) {
         return {
@@ -97,7 +107,10 @@ export function buildDashboardMcpServer({
       }
 
       try {
-        const output = await answer(question, snapshot);
+        const output = await answer(question, snapshot, {
+          callerId,
+          state: answerState,
+        });
         return {
           content: [{ type: "text", text: output.answer }],
           structuredContent: output,

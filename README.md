@@ -1,10 +1,10 @@
 # Local Daily Dashboard
 
 A polished, local-first daily briefing for AI, technology, weather, markets,
-calendar events, your recent Agent-note library, and newly added movies. The
+calendar events, your recent local Markdown notes, and newly added movies. The
 dashboard shows saved data immediately from a small local SQLite cache. It
-refreshes news every three hours, refreshes Agent-note twice a day, and still
-supports a complete manual refresh with **Refresh now**.
+refreshes every live source every three hours, refreshes the notes library twice
+a day, and still supports a complete manual refresh with **Refresh now**.
 
 The application is intentionally personal and local:
 
@@ -21,7 +21,7 @@ The application is intentionally personal and local:
 | --- | --- |
 | Trending AI | Three current X stories collected through an authenticated local Grok CLI, plus three AI stories selected from Hacker News `topstories` |
 | Tech News | Five stories from The Verge's public Most Popular list, three Wccftech Trending stories, and three recent stories each from MobileSyrup and iPhone in Canada |
-| My Library · Past 7 Days | Recent normal notes from Agent-note, with title, saved time, tags, the note's saved brief summary, and the guarded full Markdown note |
+| My Library · Past 7 Days | Recent normal Markdown notes from the configured local folder, with title, saved time, tags, the note's stored brief summary, and the full note |
 | Weather | Open-Meteo using configurable coordinates, label, and time zone |
 | Tesla | Yahoo Finance's keyless TSLA five-day chart endpoint |
 | Schedule | Up to eight upcoming macOS Calendar events from the next seven days |
@@ -40,10 +40,9 @@ boost on later refreshes.
 - npm
 - macOS for the optional Schedule card
 - Google Chrome for live YFSP movie extraction
-- An installed and authenticated Grok CLI for live X collection and Grok
-  summaries
-- Agent-note in the sibling `../Agent-note` folder, or an explicit
-  `AGENT_NOTE_PROJECT_DIR`, for the optional My Library card
+- An installed and authenticated Grok CLI for live X collection, Hacker News
+  summaries, and explicit dashboard questions
+- A readable local notes folder for the optional My Library card
 
 The dashboard still starts when optional local capabilities are unavailable.
 It keeps the last successful SQLite snapshot, browser cards, or bundled sample
@@ -68,7 +67,8 @@ DASHBOARD_DISPLAY_NAME=Your name
 DASHBOARD_WEATHER_LATITUDE=0
 DASHBOARD_WEATHER_LONGITUDE=0
 DASHBOARD_WEATHER_LOCATION=Sample location
-DASHBOARD_TIME_ZONE=UTC
+# Optional. Defaults to America/Edmonton when missing or invalid.
+# DASHBOARD_TIME_ZONE=America/Edmonton
 ```
 
 Keep your real location values only in the ignored `.env.local` file. If the
@@ -78,11 +78,23 @@ Grok executable is not on your `PATH`, add its absolute path:
 GROK_CLI_PATH=/absolute/path/to/grok
 ```
 
-If Agent-note is stored elsewhere, add its project path:
+My Library reads `~/.notes` by default. To use another folder, add its absolute
+path:
 
 ```dotenv
-AGENT_NOTE_PROJECT_DIR=/absolute/path/to/Agent-note
+DASHBOARD_NOTES_FOLDER=/absolute/path/to/notes
 ```
+
+The dashboard and Agent-note are separate projects. The dashboard does not read
+Agent-note configuration or run its code, CLI, or MCP server. It intentionally
+understands the same simple Markdown format (`title`, `date`, `tags`, and
+optional `summary` frontmatter), so an existing note folder can remain shared
+without copying or starting the Agent-note project.
+
+For migration from the old bridge, remove `AGENT_NOTE_PROJECT_DIR` and
+`AGENT_NOTE_CLI_PATH`. If `~/.notesrc` previously selected a custom
+`notes_folder`, put that folder's expanded absolute path in
+`DASHBOARD_NOTES_FOLDER`; no note migration is needed.
 
 Local environment files are ignored by Git.
 
@@ -91,7 +103,8 @@ Local environment files are ignored by Git.
 1. The browser renders bundled sample data or its last locally saved view.
 2. The local cache daemon opens the latest snapshot from
    `.local/dashboard.sqlite3`.
-3. News sources are due every three hours; Agent-note is due every 12 hours.
+3. News, weather, market, calendar, and movies are due every three hours; local
+   notes are due every 12 hours.
 4. Each source has its own SHA-256 content fingerprint. Unchanged sources keep
    their existing cards, while changed sources replace only their own rows.
 5. Local validation rejects malformed, duplicated, stale, or unsafe results.
@@ -110,8 +123,12 @@ because X does not provide an equivalent public source fingerprint.
 
 ## Ask My Dashboard
 
-Starting the app also starts a loopback-only MCP server. It currently exposes
-one read-only tool: `ask_dashboard`.
+The optional loopback-only MCP server exposes one read-only tool:
+`ask_dashboard`. Start it only when local MCP testing is needed:
+
+```bash
+npm run mcp
+```
 
 The tool selects only the relevant parts of the cached dashboard, then asks the
 local Grok 4.5 CLI for a concise answer. Web search and local file tools are
@@ -134,7 +151,7 @@ legacy transport for current Claude clients. It publishes RFC 9728 protected
 resource metadata, validates signed Auth0 JWT access tokens, and rejects any
 other identity or audience. When configured, it also requires the custom scope.
 Claude receives only `ask_dashboard`; it cannot refresh sources, open files, or
-modify dashboard or Agent-note data.
+modify dashboard or notes data.
 
 Validate the remote environment without opening a port:
 
@@ -151,20 +168,22 @@ The dashboard does not use a model to rank ordinary RSS, weather, market, or
 calendar data.
 
 My Library does not invoke a model. Its card uses the durable brief summary
-already saved by the agent that created the normal Agent-note note.
+already stored in the normal note's frontmatter. Older notes without a summary
+retain a small deterministic body-text fallback.
 
-The local helper uses Grok for four bounded operations:
+The local helper uses Grok for three bounded operations:
 
 1. search public X discussion for three current AI news clusters;
 2. summarize the readable bodies of the three already-selected Hacker News
    articles, with web search disabled; and
-3. translate the three selected movie titles, genres, and synopses into English,
-   with web search disabled; and
-4. answer an explicit `ask_dashboard` question from selected cached sections,
+3. answer an explicit `ask_dashboard` question from selected cached sections,
    with both web search and local tools disabled.
 
 All model output is parsed and validated locally. Credentials stay inside the
 installed Grok CLI and never enter browser code.
+
+Movies do not use a model. Their title, genre, and synopsis remain in the
+source language returned by YFSP after local three-card validation.
 
 ## Calendar privacy
 
@@ -181,26 +200,31 @@ Birthdays, subscribed holiday calendars, Siri suggestions, and scheduled
 reminders are excluded. If permission is denied, the Schedule card keeps its
 last successful view.
 
-## Agent-note privacy
+## Local notes privacy
 
-The local helper invokes Agent-note's existing JSON CLI for `recent --days 7`
-and its guarded `read --path` operation. Agent-note remains responsible for its
-configured notes folder, excluding raw conversation sources, and refusing
-outside or non-Markdown paths. Note paths and the helper bearer token are not
-sent to browser code.
+The local helper is a narrow read-only folder adapter. It resolves the
+configured notes root and every accepted file to canonical paths, reads only
+regular Markdown files still inside that root, and skips symlinks, hidden
+directories such as `.raw`, hidden files, non-Markdown files, and oversized or
+unreadable files. It never exposes note paths to browser code.
+
+This adapter provides no note search, write, import, or MCP tools. It does not
+start Agent-note or call a model. Compatibility is limited to reading the
+existing plain-Markdown frontmatter format.
 
 The browser stores the successful weekly library cards, including their full
 Markdown note text, in the dashboard's local cache so an existing view survives
-a temporary Agent-note outage. That cache stays in the current browser profile
-on this computer and is replaced when Agent-note next returns a successful
-result.
+a temporary notes-folder outage. That cache stays in the current browser
+profile on this computer and is replaced when the folder next returns a
+successful result.
 
 ## Movie-source boundary
 
 The movie helper reads only public listing and detail-page metadata. It does not
 use an account, browser profile, or playback link, and the dashboard never
 renders source or playback links. “Recently added” describes the source site's
-ordering, not a claim about the movie's original release date.
+ordering, not a claim about the movie's original release date. Movie text is
+shown in the source language without translation.
 
 ## Project structure
 
@@ -210,7 +234,7 @@ app/
   dashboard.tsx             dashboard UI
   data/                     source adapters, filtering, merging, and types
 scripts/
-  run-local.mjs             starts all local services and the app together
+  run-local.mjs             starts the collector, coordinator, and app together
   grok-x-collector.mjs      token-protected loopback helper
   dashboard-cache.mjs       bounded SQLite snapshot and source fingerprints
   dashboard-daemon.ts       scheduled refresh coordinator
@@ -218,7 +242,7 @@ scripts/
   dashboard-mcp.ts          local and authenticated remote MCP listeners
   dashboard-remote-auth.ts  OAuth/JWT validation and resource metadata
   calendar-events.m         minimal macOS EventKit reader
-  agent-note-library.mjs    Agent-note CLI adapter for weekly notes
+  local-notes-library.mjs   guarded direct reader for weekly Markdown notes
   yfsp-recent.mjs           public movie-list extraction
 tests/                      parser, selector, security, and SSR tests
 worker/index.ts             vinext worker entry point
@@ -234,8 +258,10 @@ npm test
 ```
 
 `npm test` performs a production build before running the Node test suite.
-`npm run daemon` and `npm run mcp` are available for focused local debugging;
-normal use should start everything together with `npm run dev`.
+`npm run daemon` and `npm run mcp` are available for focused local debugging.
+Normal use starts the collector, refresh coordinator, and visual app together
+with `npm run dev`; it does not start the optional local MCP listener. The
+authenticated remote MCP connector is managed separately and is unaffected.
 
 ## Build tooling
 

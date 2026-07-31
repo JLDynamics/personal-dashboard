@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { readSavedDashboard, refreshDashboard } from "./data/dashboard-store";
+import { formatDashboardClock } from "./data/dashboard-time-zone";
 import { sampleData } from "./data/sample-data";
 import { recordTechNewsClick } from "./data/tech-news-selection";
 import type {
@@ -53,12 +54,7 @@ function SectionHeading({
 }
 
 function formatRefreshTime(value: string, timeZone: string) {
-  const date = new Date(value);
-  return new Intl.DateTimeFormat("en-CA", {
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone,
-  }).format(date);
+  return formatDashboardClock(value, timeZone);
 }
 
 function formatLibraryTime(value: string, timeZone: string) {
@@ -120,11 +116,7 @@ function scheduleDayLabel(value: string, timeZone: string) {
 
 function scheduleTimeLabel(event: CalendarEvent, timeZone: string) {
   if (event.allDay) return "All day";
-  return new Intl.DateTimeFormat("en-CA", {
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone,
-  }).format(new Date(event.startAt));
+  return formatDashboardClock(event.startAt, timeZone);
 }
 
 function sparklineHeights(history: number[]) {
@@ -383,8 +375,8 @@ export function Dashboard() {
                 </strong>
                 <p>
                   {data.sourceStatus.library.includes("unavailable")
-                    ? "Agent-note couldn’t be reached. The rest of your dashboard will keep working."
-                    : "No notes were saved in Agent-note during the past 7 days."}
+                    ? "The configured notes folder couldn’t be read. The rest of your dashboard will keep working."
+                    : "No notes were saved in the configured folder during the past 7 days."}
                 </p>
               </div>
             )}

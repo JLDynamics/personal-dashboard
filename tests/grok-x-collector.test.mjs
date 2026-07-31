@@ -4,19 +4,16 @@ import test from "node:test";
 import {
   GROK_MODEL,
   HN_SUMMARY_PROMPT,
-  MOVIE_TRANSLATION_PROMPT,
   collectTrendingAi,
-  createEnglishMovieCollector,
+  createMovieCollector,
   grokArguments,
   hackerNewsSummaryArguments,
-  movieTranslationArguments,
   parseGrokCliOutput,
   summarizeHackerNewsStories,
-  translateMoviesToEnglish,
   validateHackerNewsSummaries,
   validateGrokPayload,
-  validateMovieTranslations,
 } from "../scripts/grok-x-collector.mjs";
+import { YfspMovieError } from "../scripts/yfsp-recent.mjs";
 
 const validItems = [
   {
@@ -214,7 +211,7 @@ test("HN summary arguments contain only supplied stories and disable search", ()
   assert.match(prompt, /full article text/i);
 });
 
-const moviesToTranslate = [
+const sourceLanguageMovies = [
   {
     id: "yfsp-one",
     title: "利未记",
@@ -247,101 +244,53 @@ const moviesToTranslate = [
   },
 ];
 
-const englishMovies = [
-  {
-    id: "yfsp-one",
-    title: "Leviticus",
-    genre: "Romance · Science fiction · Horror",
-    description:
-      "After his father dies, Naim and his mother move to a conservative religious town to begin a new life.",
-  },
-  {
-    id: "yfsp-two",
-    title: "Blazing Sands",
-    genre: "Drama · Action · Crime",
-    description:
-      "Narcotics officers enter dangerous territory and uncover a large drug-smuggling network.",
-  },
-  {
-    id: "yfsp-three",
-    title: "Supergirl",
-    genre: "Action · Science fiction · Fantasy",
-    description:
-      "Supergirl crosses the stars with an unexpected ally to confront the enemy who attacked her home.",
-  },
-];
-
-test("translates all three movie cards in one no-search Grok call", async () => {
-  let invocation;
-  const result = await translateMoviesToEnglish({
-    movies: moviesToTranslate,
-    environment: {
-      PATH: "/usr/bin",
-      HOME: "/tmp/fake-home",
-      GROK_CLI_PATH: "/fake/grok",
-    },
-    execute: async (executable, args, options) => {
-      invocation = { executable, args, options };
-      return { stdout: JSON.stringify(englishMovies) };
-    },
+test("passes through three validated source-language movie cards", async () => {
+  const collector = createMovieCollector({
+    collect: async () => ({ items: sourceLanguageMovies }),
   });
+  const result = await collector();
 
+  assert.deepEqual(result.items, sourceLanguageMovies);
+  assert.equal(result.items[0].title, "利未记");
+  assert.equal(result.items[1].genre, "剧情 · 动作 · 犯罪");
+  assert.match(result.items[2].description, /超级少女/);
+  assert.equal(collector.getDiagnostic().status, "ok");
+  assert.ok(collector.getDiagnostic().lastSuccessAt);
+});
+
+test("records safe movie validation diagnostics without source text", async () => {
+  const collector = createMovieCollector({
+    collect: async () => ({ items: sourceLanguageMovies.slice(0, 2) }),
+  });
+  await assert.rejects(collector(), YfspMovieError);
   assert.deepEqual(
-    result.items.map(({ title, genre, description }) => ({
-      title,
-      genre,
-      description,
-    })),
-    englishMovies.map(({ title, genre, description }) => ({
-      title,
-      genre,
-      description,
-    })),
+    {
+      status: collector.getDiagnostic().status,
+      stage: collector.getDiagnostic().lastError.stage,
+      code: collector.getDiagnostic().lastError.code,
+    },
+    {
+      status: "error",
+      stage: "validation",
+      code: "three_cards_required",
+    },
   );
-  assert.equal(result.items[0].posterUrl, moviesToTranslate[0].posterUrl);
-  assert.equal(result.items[1].posterAlt, "Blazing Sands poster");
-  assert.equal(invocation.executable, "/fake/grok");
-  assert.equal(invocation.options.timeoutMs, 20_000);
-  assert.ok(invocation.args.includes("--disable-web-search"));
-  const prompt = invocation.args[invocation.args.indexOf("--single") + 1];
-  assert.ok(prompt.startsWith(MOVIE_TRANSLATION_PROMPT));
+  assert.doesNotMatch(
+    JSON.stringify(collector.getDiagnostic()),
+    /利未记|爱情|父亲/,
+  );
 });
 
-test("rejects untranslated movie fields and caches unchanged translations", async () => {
-  assert.throws(
-    () =>
-      validateMovieTranslations(
-        {
-          items: englishMovies.map((movie, index) =>
-            index === 1 ? { ...movie, title: "烈焰狂沙" } : movie,
-          ),
-        },
-        moviesToTranslate,
-      ),
-    /invalid movie translation/,
-  );
-
-  let translations = 0;
-  const collector = createEnglishMovieCollector({
-    collect: async () => ({ items: moviesToTranslate }),
-    translate: async () => {
-      translations += 1;
-      return validateMovieTranslations(
-        { items: englishMovies },
-        moviesToTranslate,
-      );
+test("records source scrape diagnostics separately from validation", async () => {
+  const collector = createMovieCollector({
+    collect: async () => {
+      throw new YfspMovieError("scrape", "list_request_failed");
     },
   });
-  await collector();
-  await collector();
-  assert.equal(translations, 1);
-});
-
-test("movie translation arguments request only supplied text", () => {
-  const args = movieTranslationArguments(moviesToTranslate);
-  const prompt = args[args.indexOf("--single") + 1];
-  assert.ok(prompt.startsWith(MOVIE_TRANSLATION_PROMPT));
-  assert.ok(args.includes("--disable-web-search"));
-  assert.doesNotMatch(prompt, /Search X for/i);
-  assert.match(prompt, /"title":"利未记"/);
+  await assert.rejects(collector(), YfspMovieError);
+  assert.equal(collector.getDiagnostic().lastError.stage, "scrape");
+  assert.equal(
+    collector.getDiagnostic().lastError.code,
+    "list_request_failed",
+  );
 });

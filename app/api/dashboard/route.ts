@@ -1,4 +1,5 @@
 import { getLiveDashboard } from "../../data/live-adapters";
+import { withResolvedDashboardTimeZone } from "../../data/dashboard-time-zone";
 import type { DashboardData } from "../../data/types";
 
 export const dynamic = "force-dynamic";
@@ -52,10 +53,14 @@ async function readLocalCache(force: boolean): Promise<DashboardData | undefined
   }
 }
 
-async function readLiveData(force: boolean) {
-  const cacheFresh =
-    cachedData && Date.now() - cachedAt < BACKGROUND_CACHE_MS;
-  if (!force && cacheFresh) return cachedData;
+async function readLiveData(force: boolean): Promise<DashboardData> {
+  if (
+    !force &&
+    cachedData &&
+    Date.now() - cachedAt < BACKGROUND_CACHE_MS
+  ) {
+    return cachedData;
+  }
   if (refreshInFlight) return refreshInFlight;
 
   refreshInFlight = (async () =>
@@ -71,7 +76,10 @@ async function readLiveData(force: boolean) {
 
 export async function GET(request: Request) {
   const force = new URL(request.url).searchParams.get("force") === "1";
-  const data = await readLiveData(force);
+  const data = withResolvedDashboardTimeZone(
+    await readLiveData(force),
+    process.env.DASHBOARD_TIME_ZONE,
+  );
 
   return Response.json(data, {
     headers: {

@@ -1,7 +1,7 @@
 {
   "name": "local-daily-dashboard",
   "version": "0.1.0",
-  "description": "A local-first dashboard with cached briefings, Agent-note, and a read-only MCP interface.",
+  "description": "A local-first dashboard with cached briefings, local notes, and a read-only MCP interface.",
   "private": true,
   "license": "MIT",
   "engines": {

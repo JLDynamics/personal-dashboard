@@ -105,7 +105,7 @@ test("server-renders the complete personal dashboard", async () => {
 });
 
 test("removes starter-only files and keeps the live-source boundary", async () => {
-  const [page, layout, dashboard, packageJson, adapters, liveAdapters, hackerNews, route, refreshPolicy, viteConfig, collector, calendarCollector, agentNoteLibrary] = await Promise.all([
+  const [page, layout, dashboard, packageJson, adapters, liveAdapters, hackerNews, route, refreshPolicy, viteConfig, collector, calendarCollector, localNotesLibrary, daemon] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/dashboard.tsx", import.meta.url), "utf8"),
@@ -118,7 +118,8 @@ test("removes starter-only files and keeps the live-source boundary", async () =
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
     readFile(new URL("../scripts/grok-x-collector.mjs", import.meta.url), "utf8"),
     readFile(new URL("../scripts/calendar-collector.mjs", import.meta.url), "utf8"),
-    readFile(new URL("../scripts/agent-note-library.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/local-notes-library.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/dashboard-daemon.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /<Dashboard \/>/);
@@ -153,16 +154,19 @@ test("removes starter-only files and keeps the live-source boundary", async () =
   assert.match(viteConfig, /vars: localCollectorVars/);
   assert.match(liveAdapters, /YFSP_MOVIE_FEED_URL/);
   assert.match(liveAdapters, /MACOS_CALENDAR_FEED_URL/);
-  assert.match(liveAdapters, /AGENT_NOTE_LIBRARY_FEED_URL/);
-  assert.match(viteConfig, /AGENT_NOTE_LIBRARY_FEED_URL/);
-  assert.match(collector, /agent-note-library/);
-  assert.match(agentNoteLibrary, /\["recent", "--days", "7"\]/);
-  assert.match(agentNoteLibrary, /\["read", "--path", note\.path\]/);
-  assert.match(agentNoteLibrary, /execFile/);
-  assert.match(agentNoteLibrary, /summary:\s*storedSummary/);
+  assert.match(liveAdapters, /DASHBOARD_NOTES_LIBRARY_FEED_URL/);
+  assert.match(viteConfig, /DASHBOARD_NOTES_LIBRARY_FEED_URL/);
+  assert.match(collector, /local-notes-library/);
+  assert.match(daemon, /SCHEDULED_SCOPES/);
+  assert.match(daemon, /"news",\s*"market",\s*"weather",\s*"calendar",\s*"movies",\s*"library"/);
+  assert.match(daemon, /Promise\.allSettled/);
+  assert.match(localNotesLibrary, /DASHBOARD_NOTES_FOLDER/);
+  assert.match(localNotesLibrary, /realpath/);
+  assert.match(localNotesLibrary, /entry\.isSymbolicLink\(\)/);
+  assert.match(localNotesLibrary, /legacySummaryFromNoteText/);
+  assert.doesNotMatch(localNotesLibrary, /execFile|child_process|AGENT_NOTE/);
   assert.match(dashboard, /\{note\.summary\}/);
   assert.doesNotMatch(dashboard, /\{note\.preview\}/);
-  assert.doesNotMatch(agentNoteLibrary, /parse_frontmatter|notes_folder/);
   assert.equal(
     dashboard.indexOf('className="card tech-card"') <
       dashboard.indexOf('className="card library-card"'),
